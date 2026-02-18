@@ -249,6 +249,21 @@ class XPathContext:
         # note: not currently duplicating cachedFilterResults
         return xpCtxCpy
 
+    def copyForFormulaEvaluation(self) -> XPathContext:
+        """Creates a copy suitable for parallel formula evaluation.
+
+        Copies per-evaluation state (inScopeVars, varBindings, etc.) while sharing
+        read-only model objects (modelXbrl, inputXbrlInstance, defaultDimensionAspects).
+        """
+        xpCtxCpy = XPathContext(self.modelXbrl, self.inputXbrlInstance, self.sourceElement, self.inScopeVars.copy())
+        xpCtxCpy.isRunTimeExceeded = self.isRunTimeExceeded
+        if hasattr(self, 'defaultDimensionAspects'):
+            xpCtxCpy.defaultDimensionAspects = self.defaultDimensionAspects
+        if hasattr(self, 'dimensionsAspectUniverse'):
+            xpCtxCpy.dimensionsAspectUniverse = self.dimensionsAspectUniverse
+        xpCtxCpy.customFunctions = self.customFunctions
+        return xpCtxCpy
+
     def close(self) -> None:
         self.factAspectsCache.clear()
         self.outputLastContext.clear()  # dereference

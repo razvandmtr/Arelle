@@ -822,38 +822,10 @@ def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compile
 
         formulaEvaluatorInit()  # one-time module initialization
         val.modelXbrl.profileActivity("... evaluations", minTimeToShow=1.0)
-        for instanceQname in orderedInstancesList:
-            for modelVariableSet in instanceProducingVariableSets[instanceQname]:
-                # produce variable evaluations if no dependent variables-scope relationships
-                if not val.modelXbrl.relationshipSet(XbrlConst.variablesScope).toModelObject(modelVariableSet):
-                    if (
-                        not runIDs
-                        or runIDs.match(modelVariableSet.id)
-                        or (
-                            modelVariableSet.hasConsistencyAssertion
-                            and any(
-                                runIDs.match(modelRel.fromModelObject.id)
-                                for modelRel in val.modelXbrl.relationshipSet(XbrlConst.consistencyAssertionFormula).toModelObject(modelVariableSet)
-                                if isinstance(modelRel.fromModelObject, ModelConsistencyAssertion)
-                            )
-                        )
-                    ):
-                        try:
-                            varSetId = modelVariableSet.id or modelVariableSet.xlinkLabel
-                            val.modelXbrl.profileActivity("... evaluating " + varSetId, minTimeToShow=10.0)
-                            val.modelXbrl.modelManager.showStatus(_("evaluating {0}").format(varSetId))
-                            val.modelXbrl.profileActivity("... evaluating " + varSetId, minTimeToShow=1.0)
-                            evaluate(xpathContext, modelVariableSet)
-                            xpathContext.factAspectsCache.clear()
-                            val.modelXbrl.profileStat(modelVariableSet.localName + "_" + varSetId)
-                        except XPathContext.XPathException as err:
-                            val.modelXbrl.error(
-                                err.code,
-                                _("Variable set \n%(variableSet)s \nException: \n%(error)s"),
-                                modelObject=modelVariableSet,
-                                variableSet=str(modelVariableSet),
-                                error=err.message,
-                            )
+        if formulaOptions.parallelFormulaEvaluation:
+            _evaluateVariableSetsParallel(val, xpathContext, orderedInstancesList, instanceProducingVariableSets, runIDs, evaluate)
+        else:
+            _evaluateVariableSetsSequential(val, xpathContext, orderedInstancesList, instanceProducingVariableSets, runIDs, evaluate)
         if maxFormulaRunTimeTimer:
             maxFormulaRunTimeTimer.cancel()
     except XPathContext.RunTimeExceededException:
@@ -887,6 +859,97 @@ def validate(val, xpathContext=None, parametersOnly=False, statusMsg='', compile
     del orderedParameters, orderedInstances, orderedInstancesList
     xpathContext.close()  # dereference everything
     val.modelXbrl.profileStat(_("formulaExecutionTotal"), time.time() - timeFormulasStarted)
+
+
+def _isEligibleVariableSet(val, modelVariableSet, runIDs):
+    """Check if a variable set should be evaluated based on scope and run ID filters."""
+    if val.modelXbrl.relationshipSet(XbrlConst.variablesScope).toModelObject(modelVariableSet):
+        return False
+    if (
+        not runIDs
+        or runIDs.match(modelVariableSet.id)
+        or (
+            modelVariableSet.hasConsistencyAssertion
+            and any(
+                runIDs.match(modelRel.fromModelObject.id)
+                for modelRel in val.modelXbrl.relationshipSet(XbrlConst.consistencyAssertionFormula).toModelObject(modelVariableSet)
+                if isinstance(modelRel.fromModelObject, ModelConsistencyAssertion)
+            )
+        )
+    ):
+        return True
+    return False
+
+
+def _evaluateOneVariableSet(val, xpCtx, modelVariableSet, evaluate):
+    """Evaluate a single variable set and handle profiling/errors."""
+    try:
+        varSetId = modelVariableSet.id or modelVariableSet.xlinkLabel
+        val.modelXbrl.profileActivity("... evaluating " + varSetId, minTimeToShow=10.0)
+        val.modelXbrl.modelManager.showStatus(_("evaluating {0}").format(varSetId))
+        val.modelXbrl.profileActivity("... evaluating " + varSetId, minTimeToShow=1.0)
+        evaluate(xpCtx, modelVariableSet)
+        xpCtx.factAspectsCache.clear()
+        val.modelXbrl.profileStat(modelVariableSet.localName + "_" + varSetId)
+    except XPathContext.XPathException as err:
+        val.modelXbrl.error(
+            err.code,
+            _("Variable set \n%(variableSet)s \nException: \n%(error)s"),
+            modelObject=modelVariableSet,
+            variableSet=str(modelVariableSet),
+            error=err.message,
+        )
+
+
+def _evaluateVariableSetsSequential(val, xpathContext, orderedInstancesList, instanceProducingVariableSets, runIDs, evaluate):
+    """Evaluate variable sets sequentially (original behavior)."""
+    for instanceQname in orderedInstancesList:
+        for modelVariableSet in instanceProducingVariableSets[instanceQname]:
+            if _isEligibleVariableSet(val, modelVariableSet, runIDs):
+                _evaluateOneVariableSet(val, xpathContext, modelVariableSet, evaluate)
+
+
+def _evaluateVariableSetsParallel(val, xpathContext, orderedInstancesList, instanceProducingVariableSets, runIDs, evaluate):
+    """Evaluate independent variable sets in parallel using threads."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import os
+
+    maxWorkers = os.cpu_count() or 1
+
+    for instanceQname in orderedInstancesList:
+        eligibleVariableSets = [
+            mvs for mvs in instanceProducingVariableSets[instanceQname]
+            if _isEligibleVariableSet(val, mvs, runIDs)
+        ]
+
+        if len(eligibleVariableSets) <= 1:
+            # No benefit from parallelization with 0 or 1 variable sets
+            for modelVariableSet in eligibleVariableSets:
+                _evaluateOneVariableSet(val, xpathContext, modelVariableSet, evaluate)
+            continue
+
+        futures = {}
+        with ThreadPoolExecutor(max_workers=maxWorkers) as executor:
+            for modelVariableSet in eligibleVariableSets:
+                xpCtxCopy = xpathContext.copyForFormulaEvaluation()
+                future = executor.submit(
+                    _evaluateOneVariableSet, val, xpCtxCopy, modelVariableSet, evaluate
+                )
+                futures[future] = modelVariableSet
+
+            for future in as_completed(futures):
+                exc = future.exception()
+                if exc is not None:
+                    modelVariableSet = futures[future]
+                    if isinstance(exc, XPathContext.RunTimeExceededException):
+                        raise exc
+                    val.modelXbrl.error(
+                        "formula:parallelEvaluationError",
+                        _("Variable set %(variableSet)s parallel evaluation error: %(error)s"),
+                        modelObject=modelVariableSet,
+                        variableSet=str(modelVariableSet),
+                        error=str(exc),
+                    )
 
 
 def customFunctionSignatures(val):

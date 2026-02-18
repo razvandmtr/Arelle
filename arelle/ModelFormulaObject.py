@@ -55,6 +55,7 @@ class FormulaOptions():
         self.testcaseResultsCaptureWarnings = False
         self.testcaseResultOptions = None
         self.testcaseExpectedErrors = None
+        self.parallelFormulaEvaluation = False  # parallelize independent variable set evaluations
         if isinstance(savedValues, dict):
             self.__dict__.update(savedValues)
 
