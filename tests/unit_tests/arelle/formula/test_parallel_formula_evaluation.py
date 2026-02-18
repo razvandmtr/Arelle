@@ -71,10 +71,19 @@ class TestXPathContextCopyForFormulaEvaluation:
         assert copy.customFunctions["my_func"] is custom_fn
 
     def test_copy_has_independent_fact_aspects_cache(self):
+        import uuid
         xpCtx = self._make_xp_ctx()
         copy = xpCtx.copyForFormulaEvaluation()
-        # Each copy should have its own cache
+        # Each copy should have its own cache instance
         assert copy.factAspectsCache is not xpCtx.factAspectsCache
+        # Verify modifications to one cache don't affect the other
+        class _Fact:
+            def __init__(self):
+                self.uniqueUUID = uuid.uuid4()
+        f1, f2 = _Fact(), _Fact()
+        xpCtx.factAspectsCache.cacheMatch(f1, f2, "aspect")
+        assert xpCtx.factAspectsCache.evaluations(f1, f2) == {"aspect": True}
+        assert copy.factAspectsCache.evaluations(f1, f2) is None
 
 
 class TestEligibleVariableSet:

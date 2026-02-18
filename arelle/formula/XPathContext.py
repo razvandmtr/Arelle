@@ -257,10 +257,13 @@ class XPathContext:
         """
         xpCtxCpy = XPathContext(self.modelXbrl, self.inputXbrlInstance, self.sourceElement, self.inScopeVars.copy())
         xpCtxCpy.isRunTimeExceeded = self.isRunTimeExceeded
+        # defaultDimensionAspects and dimensionsAspectUniverse are set up once in
+        # ValidateFormula.validate() before evaluation begins and are read-only during evaluation.
         if hasattr(self, 'defaultDimensionAspects'):
             xpCtxCpy.defaultDimensionAspects = self.defaultDimensionAspects
         if hasattr(self, 'dimensionsAspectUniverse'):
             xpCtxCpy.dimensionsAspectUniverse = self.dimensionsAspectUniverse
+        # customFunctions is populated once during __init__ and is read-only during evaluation.
         xpCtxCpy.customFunctions = self.customFunctions
         return xpCtxCpy
 

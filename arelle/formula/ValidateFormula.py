@@ -943,6 +943,8 @@ def _evaluateVariableSetsParallel(val, xpathContext, orderedInstancesList, insta
                     modelVariableSet = futures[future]
                     if isinstance(exc, XPathContext.RunTimeExceededException):
                         raise exc
+                    # Log error and continue: each variable set is independent, so
+                    # errors in one should not prevent evaluation of others.
                     val.modelXbrl.error(
                         "formula:parallelEvaluationError",
                         _("Variable set %(variableSet)s parallel evaluation error: %(error)s"),
