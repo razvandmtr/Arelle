@@ -1300,7 +1300,7 @@ class ModelConceptFilterWithQnameExpression(ModelFilter):
         return super(ModelConceptFilterWithQnameExpression, self).variableRefs((progs or []) + (self.qnameExpressionProg or []), varRefSet)  # type: ignore[operator]
 
     def evalQname(self, xpCtx: XPathContextType, fact: ModelFact) -> QName | None:
-        fqn = getattr(self, "_cachedFilterQname", None) or self.filterQname
+        fqn = self._cachedFilterQname  # set in compile(); None means a qname expression is used
         if fqn:
             return fqn
         return xpCtx.evaluateAtomicValue(self.qnameExpressionProg, "xs:QName", fact)  # type: ignore[arg-type,no-any-return]
@@ -1341,7 +1341,7 @@ class ModelConceptCustomAttribute(ModelConceptFilterWithQnameExpression):
             facts: set[ModelFact],
             cmplmt: bool
         ) -> set[ModelFact]:
-        qn = getattr(self, "_cachedFilterQname", None) or self.filterQname
+        qn = self._cachedFilterQname  # set in compile(); None means a qname expression is used
         if qn is not None:  # static qname — hoist out of per-fact loop
             return set(fact for fact in facts
                        for v in (self.evalValue(xpCtx, fact),)
@@ -1427,7 +1427,7 @@ class ModelConceptSubstitutionGroup(ModelConceptFilterWithQnameExpression):
             facts: set[ModelFact],
             cmplmt: bool
         ) -> set[ModelFact]:
-        qn = getattr(self, "_cachedFilterQname", None) or self.filterQname
+        qn = self._cachedFilterQname  # set in compile(); None means a qname expression is used
         if qn is not None:  # static qname — hoist out of per-fact loop
             if self.strict == "true":
                 return set(fact for fact in facts
@@ -2576,7 +2576,7 @@ class ModelAncestorFilter(ModelFilter):
         return super(ModelAncestorFilter, self).variableRefs(self.qnameExpressionProg, varRefSet)
 
     def evalQname(self, xpCtx: XPathContextType, fact: ModelFact) -> QName | None:
-        aqn = getattr(self, "_cachedAncestorQname", None) or self.ancestorQname
+        aqn = self._cachedAncestorQname  # set in compile(); None means a qname expression is used
         if aqn:
             return aqn
         try:
@@ -2591,7 +2591,7 @@ class ModelAncestorFilter(ModelFilter):
             facts: set[ModelFact],
             cmplmt: bool
         ) -> set[ModelFact]:
-        qn = getattr(self, "_cachedAncestorQname", None) or self.ancestorQname
+        qn = self._cachedAncestorQname  # set in compile(); None means a qname expression is used
         if qn is not None:  # static qname — hoist out of per-fact loop
             return set(fact for fact in facts if cmplmt ^ (qn in fact.ancestorQnames))
         return set(fact for fact in facts if cmplmt ^ (self.evalQname(xpCtx, fact) in fact.ancestorQnames))
@@ -2645,7 +2645,7 @@ class ModelParentFilter(ModelFilter):
         return super(ModelParentFilter, self).variableRefs(self.qnameExpressionProg, varRefSet)
 
     def evalQname(self, xpCtx: XPathContextType, fact: ModelFact) -> QName | None:
-        pqn = getattr(self, "_cachedParentQname", None) or self.parentQname
+        pqn = self._cachedParentQname  # set in compile(); None means a qname expression is used
         if pqn:
             return pqn
         try:
@@ -2660,7 +2660,7 @@ class ModelParentFilter(ModelFilter):
             facts: set[ModelFact],
             cmplmt: bool
         ) -> set[ModelFact]:
-        qn = getattr(self, "_cachedParentQname", None) or self.parentQname
+        qn = self._cachedParentQname  # set in compile(); None means a qname expression is used
         if qn is not None:  # static qname — hoist out of per-fact loop
             return set(fact for fact in facts if cmplmt ^ (qn == fact.parentQname))
         return set(fact for fact in facts if cmplmt ^ (self.evalQname(xpCtx, fact) == fact.parentQname))
@@ -2848,7 +2848,7 @@ class ModelSingleMeasure(ModelFilter):
         return super(ModelSingleMeasure, self).variableRefs(self.qnameExpressionProg, varRefSet)
 
     def evalQname(self, xpCtx: XPathContextType, fact: ModelFact) -> QName | None:
-        mqn = getattr(self, "_cachedMeasureQname", None) or self.measureQname
+        mqn = self._cachedMeasureQname  # set in compile(); None means a qname expression is used
         if mqn:
             return mqn
         try:
@@ -2864,7 +2864,7 @@ class ModelSingleMeasure(ModelFilter):
             facts: set[ModelFact],
             cmplmt: bool
         ) -> set[ModelFact]:
-        qn = getattr(self, "_cachedMeasureQname", None) or self.measureQname
+        qn = self._cachedMeasureQname  # set in compile(); None means a qname expression is used
         if qn is not None:  # static qname — hoist out of per-fact loop
             return set(fact for fact in facts
                        if cmplmt ^ (fact.isNumeric and
