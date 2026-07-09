@@ -1293,14 +1293,16 @@ class ModelConceptFilterWithQnameExpression(ModelFilter):
             qnExprElt = XmlUtil.descendant(self, XbrlConst.cf, "qnameExpression")
             qnExpr = XmlUtil.text(qnExprElt) if qnExprElt is not None else None
             self.qnameExpressionProg = XPathParser.parse(self, qnExpr, qnExprElt, "qnameExpression", Trace.VARIABLE)  # type: ignore[arg-type]
+            self._cachedFilterQname = self.filterQname  # cache to avoid repeated XML traversal per fact
             super(ModelConceptFilterWithQnameExpression, self).compile()
 
     def variableRefs(self, progs: RecursiveFormulaTokens = [], varRefSet: set[QName] | None = None) -> set[QName]:  # type: ignore[override] # subclass may contribute progs
         return super(ModelConceptFilterWithQnameExpression, self).variableRefs((progs or []) + (self.qnameExpressionProg or []), varRefSet)  # type: ignore[operator]
 
     def evalQname(self, xpCtx: XPathContextType, fact: ModelFact) -> QName | None:
-        if self.filterQname:
-            return self.filterQname
+        fqn = getattr(self, "_cachedFilterQname", None) or self.filterQname
+        if fqn:
+            return fqn
         return xpCtx.evaluateAtomicValue(self.qnameExpressionProg, "xs:QName", fact)  # type: ignore[arg-type,no-any-return]
 
 
@@ -1339,6 +1341,13 @@ class ModelConceptCustomAttribute(ModelConceptFilterWithQnameExpression):
             facts: set[ModelFact],
             cmplmt: bool
         ) -> set[ModelFact]:
+        qn = getattr(self, "_cachedFilterQname", None) or self.filterQname
+        if qn is not None:  # static qname — hoist out of per-fact loop
+            return set(fact for fact in facts
+                       for v in (self.evalValue(xpCtx, fact),)
+                       for c in (fact.concept,)
+                       if cmplmt ^ (c.get(qn.clarkNotation) is not None and  # type: ignore[union-attr]
+                                    (v is None or v == typedValue(xpCtx.modelXbrl, c, attrQname=qn))))  # type: ignore[arg-type]
         return set(fact for fact in facts
                    for qn in (self.evalQname(xpCtx, fact),)
                    for v in (self.evalValue(xpCtx, fact),)
@@ -1418,6 +1427,13 @@ class ModelConceptSubstitutionGroup(ModelConceptFilterWithQnameExpression):
             facts: set[ModelFact],
             cmplmt: bool
         ) -> set[ModelFact]:
+        qn = getattr(self, "_cachedFilterQname", None) or self.filterQname
+        if qn is not None:  # static qname — hoist out of per-fact loop
+            if self.strict == "true":
+                return set(fact for fact in facts
+                           if cmplmt ^ (fact.concept.substitutionGroupQname == qn))  # type: ignore[union-attr]
+            return set(fact for fact in facts
+                       if fact.concept is not None and cmplmt ^ fact.concept.substitutesForQname(qn))  # type: ignore[arg-type]
         if self.strict == "true":
             return set(fact for fact in facts
                        if cmplmt ^ (fact.concept.substitutionGroupQname == self.evalQname(xpCtx, fact)))  # type: ignore[union-attr]
@@ -2553,15 +2569,16 @@ class ModelAncestorFilter(ModelFilter):
     def compile(self) -> None:
         if not hasattr(self, "qnameExpressionProg"):
             self.qnameExpressionProg = XPathParser.parse(self, self.qnameExpression, self, "qnameExpressionProg", Trace.VARIABLE)
+            self._cachedAncestorQname = self.ancestorQname  # cache to avoid repeated XML traversal per fact
             super(ModelAncestorFilter, self).compile()
 
     def variableRefs(self, progs: RecursiveFormulaTokens = [], varRefSet: set[QName] | None = None) -> set[QName]:  # type: ignore[override]
         return super(ModelAncestorFilter, self).variableRefs(self.qnameExpressionProg, varRefSet)
 
     def evalQname(self, xpCtx: XPathContextType, fact: ModelFact) -> QName | None:
-        ancestorQname = self.ancestorQname
-        if ancestorQname:
-            return ancestorQname
+        aqn = getattr(self, "_cachedAncestorQname", None) or self.ancestorQname
+        if aqn:
+            return aqn
         try:
             return xpCtx.evaluateAtomicValue(self.qnameExpressionProg, "xs:QName", fact)  # type: ignore[arg-type,no-any-return]
         except:
@@ -2574,6 +2591,9 @@ class ModelAncestorFilter(ModelFilter):
             facts: set[ModelFact],
             cmplmt: bool
         ) -> set[ModelFact]:
+        qn = getattr(self, "_cachedAncestorQname", None) or self.ancestorQname
+        if qn is not None:  # static qname — hoist out of per-fact loop
+            return set(fact for fact in facts if cmplmt ^ (qn in fact.ancestorQnames))
         return set(fact for fact in facts if cmplmt ^ (self.evalQname(xpCtx, fact) in fact.ancestorQnames))
 
     @property
@@ -2618,15 +2638,16 @@ class ModelParentFilter(ModelFilter):
     def compile(self) -> None:
         if not hasattr(self, "qnameExpressionProg"):
             self.qnameExpressionProg = XPathParser.parse(self, self.qnameExpression, self, "qnameExpressionProg", Trace.VARIABLE)
+            self._cachedParentQname = self.parentQname  # cache to avoid repeated XML traversal per fact
             super(ModelParentFilter, self).compile()
 
     def variableRefs(self, progs: RecursiveFormulaTokens = [], varRefSet: set[QName] | None = None) -> set[QName]:  # type: ignore[override]
         return super(ModelParentFilter, self).variableRefs(self.qnameExpressionProg, varRefSet)
 
     def evalQname(self, xpCtx: XPathContextType, fact: ModelFact) -> QName | None:
-        parentQname = self.parentQname
-        if parentQname:
-            return parentQname
+        pqn = getattr(self, "_cachedParentQname", None) or self.parentQname
+        if pqn:
+            return pqn
         try:
             return xpCtx.evaluateAtomicValue(self.qnameExpressionProg, "xs:QName", fact)  # type: ignore[no-any-return,arg-type]
         except:
@@ -2639,6 +2660,9 @@ class ModelParentFilter(ModelFilter):
             facts: set[ModelFact],
             cmplmt: bool
         ) -> set[ModelFact]:
+        qn = getattr(self, "_cachedParentQname", None) or self.parentQname
+        if qn is not None:  # static qname — hoist out of per-fact loop
+            return set(fact for fact in facts if cmplmt ^ (qn == fact.parentQname))
         return set(fact for fact in facts if cmplmt ^ (self.evalQname(xpCtx, fact) == fact.parentQname))
 
 
@@ -2817,15 +2841,16 @@ class ModelSingleMeasure(ModelFilter):
     def compile(self) -> None:
         if not hasattr(self, "qnameExpressionProg"):
             self.qnameExpressionProg = XPathParser.parse(self, self.qnameExpression, self, "qnameExpressionProg", Trace.VARIABLE)
+            self._cachedMeasureQname = self.measureQname  # cache to avoid repeated XML traversal per fact
             super(ModelSingleMeasure, self).compile()
 
     def variableRefs(self, progs: RecursiveFormulaTokens = [], varRefSet: set[QName] | None = None) -> set[QName]:  # type: ignore[override]
         return super(ModelSingleMeasure, self).variableRefs(self.qnameExpressionProg, varRefSet)
 
     def evalQname(self, xpCtx: XPathContextType, fact: ModelFact) -> QName | None:
-        measureQname = self.measureQname
-        if measureQname:
-            return measureQname
+        mqn = getattr(self, "_cachedMeasureQname", None) or self.measureQname
+        if mqn:
+            return mqn
         try:
             return xpCtx.evaluateAtomicValue(self.qnameExpressionProg, "xs:QName", fact)  # type: ignore[arg-type,no-any-return]
         except Exception as ex:
@@ -2839,6 +2864,12 @@ class ModelSingleMeasure(ModelFilter):
             facts: set[ModelFact],
             cmplmt: bool
         ) -> set[ModelFact]:
+        qn = getattr(self, "_cachedMeasureQname", None) or self.measureQname
+        if qn is not None:  # static qname — hoist out of per-fact loop
+            return set(fact for fact in facts
+                       if cmplmt ^ (fact.isNumeric and
+                                    fact.unit.isSingleMeasure and  # type: ignore[union-attr]
+                                    fact.unit.measures[0][0] == qn))  # type: ignore[union-attr]
         return set(fact for fact in facts
                    if cmplmt ^ (fact.isNumeric and
                                 fact.unit.isSingleMeasure and  # type: ignore[union-attr]
